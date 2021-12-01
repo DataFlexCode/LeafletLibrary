@@ -1,0 +1,393 @@
+﻿Use cWebBaseControl.pkg
+Use cJsonObject.pkg
+
+// Geoserver structs
+
+Struct stGsGeom
+    String type
+    Number[][][] coordinates
+End_Struct
+
+Struct stGsFeature
+    String   type
+    String   id
+    stGsGeom geometry
+End_Struct
+
+Struct stGeoserverResp
+    String type
+    Integer totalFeatures
+    stGsFeature[] features
+End_Struct
+
+Struct stMapInfo
+    Number   lat
+    Number   lng
+    Number   zoom
+End_Struct
+
+Struct stMarker
+    Number[] aPoint
+    String   sText
+    Boolean  bRise
+    String   sIcon
+End_Struct
+
+Struct stMarkers
+    stMarker[] atMarkers
+End_Struct
+
+Struct stPolygon
+    Number[][] aPoints
+    Boolean    bStroke
+    String     sLineColor
+    Integer    iLineWeight
+    Number     nLineOpacity
+    String     sFillColor
+    Number     nFillOpacity
+    Boolean    bFitMap
+End_Struct
+
+Struct stPolygons
+    stPolygon[] atPolygons
+End_Struct
+
+Struct stPolyline
+    Number[][] aPoints
+    Boolean    bStroke
+    Boolean    bFitMap
+    String     sLineColor
+    Integer    iLineWeight
+    Number     nOpacity
+    String     sText
+End_Struct
+
+Struct stPolylines
+    stPolyline[] atPolylines
+End_Struct
+
+Struct stCircle
+    Number[] aCenter
+    // ToDo:  More
+End_Struct
+
+Struct stCircles
+    stCircle[] atCircles
+End_Struct
+
+Class cLeafletMappingControl is a cWebBaseControl
+    
+    Procedure Construct_Object
+        Forward Send Construct_Object
+        
+        Property String psMapDataAttrib 'Map data &copy; <a href="https://www.openstreetmap.org/" target="_blank">OpenStreetMap</a>'
+        Property String psImageryAttrib 'Imagery &copy; <a href="https://www.mapbox.com/" target="_blank">Mapbox</a>'
+        
+        // Client properties
+        { WebProperty=Client }
+        Property Number     pnNorth
+        { WebProperty=Client }
+        Property Number     pnEast
+        { WebProperty=Client }
+        Property Integer    piInitialZoom
+        { WebProperty=Client }
+        Property String     psTileLayer
+        { WebProperty=Client }
+        Property Integer    piMaxZoom
+        { WebProperty=Client }
+        Property String     psAccessToken
+        { WebProperty=Client }
+        Property String     psLayerID
+        { WebProperty=Client }
+        { EnumList = "256, 512, 1024" }
+        Property String     psTileSize "256"
+        { WebProperty=Client }
+        Property String     psAttribution
+        { WebProperty=Client }
+        Property Boolean    pbAttribution
+        { WebProperty=Client }
+        Property Boolean    pbZoomControl
+        { WebProperty=Client }
+        Property Boolean    pbServerOnMapClick
+        { WebProperty=Client }
+        Property Boolean    pbServerOnMapDblClick
+        
+        // These  are for passing JSON string representations of the 
+        // matching server properties below to the client / server
+        { WebProperty=Client }
+        Property String     psMarkers
+        { WebProperty=Client }
+        Property String     psPolygons
+        { WebProperty=Client }
+        Property String     psPolylines
+        { WebProperty=Client }
+        Property String     psCurrentMapInfo
+        
+        // Server properties
+        { WebProperty=Server }
+        Property stMarkers  ptMarkers
+        { WebProperty=Server }
+        Property stPolygons ptPolygons
+        { WebProperty=Server }
+        Property stPolylines ptPolylines
+        
+        // Note: you will need to get your own access token and set it here:
+        Set psAccessToken   to (Config("tokens.leafletAccessToken"))
+        Set psTileLayer     to "https://api.mapbox.com/styles/v1/{id}/tiles/{z}/{x}/{y}?access_token={accessToken}"
+        Set psLayerID       to "mapbox/streets-v11"        
+        Set psAttribution   to 'Map data &copy; <a href="https://www.openstreetmap.org/" target="_blank">OpenStreetMap</a> contributors: Imagery &copy; <a href="https://www.mapbox.com/">Mapbox</a>'
+
+        Set pbShowLabel     to False  // No label by default
+        Set piMinHeight     to 100
+        Set piColumnSpan    to 0
+        Set pbFillHeight    to True
+        
+        Set psJSClass to "dfcc.leafletMappingControl"
+    End_Procedure
+
+    Procedure RenderMap
+        Send ClientAction "drawMap"
+    End_Procedure
+    
+    Procedure DefineMap Number nNorth Number nEast Integer iInitZoom Integer iMaxZoom
+        WebSet pnNorth          to nNorth
+        WebSet pnEast           to nEast
+        WebSet piInitialZoom    to iInitZoom
+        WebSet piMaxZoom        to iMaxZoom
+    End_Procedure
+    
+    // This is just a shothhand for DefineMap plus RenderMap in one step
+    Procedure DrawMap Number nNorth Number nEast Integer iInitZoom Integer iMaxZoom
+        Send DefineMap nNorth nEast iInitZoom iMaxZoom
+        Send RenderMap
+    End_Procedure
+    
+    Procedure FitBounds Number nMinN Number nMinE Number nMaxN Number nMaxE
+        String[] asParams
+        
+        Move nMinN to asParams[0]
+        Move nMinE to asParams[1]
+        Move nMaxN to asParams[2]
+        Move nMaxE to asParams[3]
+        
+        Send ClientAction "fitBounds" asParams
+    End_Procedure
+    
+    Function AddPolygon stPolygon tPolygon Returns Integer
+        stPolygons tPolys
+        Integer iIndex
+        Handle  hoJson
+        String  sJson
+        
+        WebGet ptPolygons to tPolys
+        Move (SizeOfArray(tPolys.atPolygons)) to iIndex
+        Move tPolygon to tPolys.atPolygons[iIndex]
+        WebSet ptPolygons to tPolys
+        
+        Get Create (RefClass(cJsonObject)) to hoJson
+        Send DataTypeToJson of hoJson tPolys
+        Get Stringify of hoJson to sJson
+        Send Destroy of hoJson
+        WebSet psPolygons to sJson
+        
+        Function_Return iIndex
+    End_Function
+    
+    Procedure RemovePolygon Integer iIndex
+        stPolygons tPolys
+        String[]   asParams
+        Handle     hoJson
+        String     sJson
+        
+        WebGet ptPolygons to tPolys
+        
+        If (iIndex < SizeOfArray(tPolys.atPolygons)) Begin
+            // Remove it from the server side property
+            Move (RemoveFromArray(tPolys.atPolygons, iIndex)) to tPolys.atPolygons
+            WebSet ptPolygons to tPolys
+            
+            // Serialize that and web set it
+            Get Create (RefClass(cJsonObject)) to hoJson
+            Send DataTypeToJson of hoJson tPolys
+            Get Stringify of hoJson to sJson
+            Send Destroy of hoJson
+            WebSet psPolygons to sJson
+            
+            // Remove it from the client
+            Move iIndex to asParams[0]
+            Send ClientAction "removePolygon" asParams
+        End
+        
+    End_Procedure
+        
+    Procedure RenderPolygon Integer iIndex
+        String[] asParams
+        
+        Move iIndex to asParams[0]
+        Send ClientAction "drawPolygon" asParams
+    End_Procedure
+    
+    Procedure UnrenderPolygon Integer iIndex
+        String[] asParams
+        
+        Move iIndex to asParams[0]
+        Send ClientAction "undrawPolygon" asParams
+    End_Procedure
+    
+    // Shortcut combining AddPolygon and RenderPolygon
+    Procedure DrawPolygon stPolygon tPoly
+        Integer i
+        
+        Get AddPolygon tPoly to i
+        Send RenderPolygon i
+    End_Procedure
+    
+    Function DefinePolyline stPolyline tLine Returns Integer
+        stPolylines tLines
+        Integer iIndex
+        Handle  hoJson
+        String  sJson
+        
+        WebGet ptPolylines to tLines
+        Move (SizeOfArray(tLines.atPolylines)) to iIndex
+        Move tLine to tLines.atPolylines[iIndex]
+        WebSet ptPolylines to tLines
+        
+        Get Create (RefClass(cJsonObject)) to hoJson
+        Send DataTypeToJson of hoJson tLines
+        Get Stringify of hoJson to sJson
+        Send Destroy of hoJson
+        WebSet psPolylines to sJson
+        
+        Function_Return iIndex
+    End_Function
+    
+    Procedure RenderPolyline Integer iIndex
+        String[] asParams
+        
+        Move iIndex to asParams[0]
+        Send ClientAction "drawPolyline" asParams
+    End_Procedure
+    
+    Procedure DrawPolyLine stPolyline tLine
+        Integer iIndex
+        
+        Get DefinePolyline tLine to iIndex
+        Send RenderPolyline iIndex
+    End_Procedure
+    
+    Function DefineMarker Number nNorth Number nEast String sText String sIcon Boolean bRise Returns Integer
+        stMarkers tMarkers
+        Integer   iIndex
+        Handle    hoJson
+        String    sJson
+        
+        WebGet ptMarkers to tMarkers
+        Move (SizeOfArray(tMarkers.atMarkers)) to iIndex
+        Move nNorth to tMarkers.atMarkers[iIndex].aPoint[0]
+        Move nEast  to tMarkers.atMarkers[iIndex].aPoint[1]
+        Move sText  to tMarkers.atMarkers[iIndex].sText
+        Move bRise  to tMarkers.atMarkers[iIndex].bRise
+        Move sIcon  to tMarkers.atMarkers[iIndex].sIcon
+        WebSet ptMarkers to tMarkers
+        
+        Get Create (RefClass(cJsonObject)) to hoJson
+        Send DataTypeToJson of hoJson tMarkers
+        Get Stringify of hoJson to sJson
+        Send Destroy of hoJson
+        WebSet psMarkers to sJson
+        
+        Function_Return iIndex
+    End_Function
+    
+    Procedure ShowMarker Integer iIndex
+        String[] asParams
+        
+        Move iIndex to asParams[0]
+        Send ClientAction "drawMarker" asParams
+    End_Procedure
+    
+    Procedure HideMarker  Integer iIndex
+        String[] asParams
+        
+        Move iIndex to asParams[0]
+        Send ClientAction "hideMarker" asParams
+    End_Procedure
+    
+    // Shortcut combining DefineMarker and ShowMarker
+    Procedure DrawMarker Number nNorth Number nEast String sText String sIcon Boolean bRise
+        Integer iMrk
+        
+        Get DefineMarker nNorth nEast sText sIcon bRise to iMrk
+        Send ShowMarker iMrk
+    End_Procedure
+    
+    Procedure OnMapClick String sLat String sLng
+    End_Procedure
+    
+    Procedure OnMapDblClick String sLat String sLng
+    End_Procedure
+    
+    Function CurrentMapInfo Returns stMapInfo
+        String    sInfo
+        stMapInfo tInfo
+        Handle    hoJson
+        Boolean   bOK
+        
+        WebGet psCurrentMapInfo to sInfo
+        
+        If (sInfo <> "") Begin
+            Get Create (RefClass(cJsonObject)) to hoJson
+            Set pbRequireAllMembers of hoJson to False
+            Get ParseString of hoJson sInfo to bOK
+            
+            If bOK ;
+                Get JsonToDataType of hoJson to tInfo
+            Send Destroy of hoJson
+        End
+        
+        Function_Return tInfo
+    End_Function
+    
+    Procedure ChangeLayer String sLayer
+        String[] asParams
+        
+        Move sLayer to asParams[0]
+        Send ClientAction "changeLayer" asParams
+    End_Procedure
+    
+    Procedure ChangeResolution String sRes
+        WebSet psTileSize to sRes
+
+        Send ClientAction "changeResolution"
+    End_Procedure
+    
+    Procedure GetMyLocation
+        Send ClientAction "getCurrentLoc"
+    End_Procedure
+        
+    Procedure MyLocation Number nLat Number nLng 
+    End_Procedure
+    
+    Procedure GeoContributor String sName String sURL String sRole Boolean bCopy
+        String sMapAtt sImageAtt sAttribution
+        
+        Get psMapDataAttrib to sMapAtt
+        Get psImageryAttrib to sImageAtt
+        
+        Move (sMapAtt + ", contributors:" * ;
+              sRole * If(bCopy, "&copy; ", "") + ;
+              If((sURL = ""), "", ("<a href='" + sURL + "' target='_blank'>")) + ;
+              sName + If((sURL = ""), "", "</a>") * sImageAtt) to sAttribution
+        
+        WebSet psAttribution to sAttribution
+    End_Procedure
+    
+    Procedure End_Construct_Object
+        WebPublishProcedure OnMapClick
+        WebPublishProcedure OnMapDblClick
+        WebPublishProcedure MyLocation
+        Forward Send End_Construct_Object
+    End_Procedure
+    
+End_Class
